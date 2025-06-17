@@ -83,6 +83,8 @@
         "cstdarg": "cpp",
         "numeric": "cpp",
         "source_location": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "queue": "cpp",
+        "xstddef": "cpp"
     }
 }

@@ -22,9 +22,8 @@ enum class Role {
 
 struct ChannelData {   
     boost::interprocess::interprocess_mutex mutex;          // 互斥锁
-    boost::interprocess::interprocess_condition cond_sender; // 发送者条件变量
-    boost::interprocess::interprocess_condition cond_receiver; // 接收者条件变量
-    bool is_full;                      // 数据是否可用
+    boost::interprocess::interprocess_condition cond; // 条件变量
+    bool is_full;
     size_t size;                       // 数据大小
     char buffer[1024];                 // 数据缓冲区
 };

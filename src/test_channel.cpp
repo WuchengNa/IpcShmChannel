@@ -4,6 +4,14 @@
 
 #define SHM_NAME "TEST_IPCCHN"
 
+TEST(api,clear)
+{
+    std::string up = std::string(SHM_NAME) + "_up";
+    std::string down = std::string(SHM_NAME) + "_down";
+    boost::interprocess::shared_memory_object::remove(up.c_str());
+    boost::interprocess::shared_memory_object::remove(down.c_str());
+}
+
 TEST(api,server)
 {
         IpcShmChannel server(Role::SERVER, SHM_NAME);
