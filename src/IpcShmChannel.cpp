@@ -1,7 +1,34 @@
 #include "IpcShmChannel.h"
 
+#ifdef _WINDOWS
+    #include <windows.h>
+#else
+    #include <unistd.h>
+#endif
+
 using namespace boost::interprocess;
 
+class ChannelData {
+public:
+    ChannelData()
+    :is_full(false)
+     ,size(0)
+     , owner_pid(0)
+    {
+
+    }
+    ~ChannelData()
+    {
+
+    }
+
+    boost::interprocess::interprocess_mutex mutex;          // 互斥锁
+    boost::interprocess::interprocess_condition cond; // 条件变量
+    int  owner_pid;
+    bool is_full;
+    size_t size;                       // 数据大小
+    char buffer[1024];                 // 数据缓冲区
+};
 
 bool IpcShmChannel::create_shared_memory(const std::string& shm_name, shared_memory_object& shm, mapped_region& region, ChannelData*& channel) {
     
@@ -19,7 +46,13 @@ bool IpcShmChannel::create_shared_memory(const std::string& shm_name, shared_mem
     new (region.get_address()) ChannelData();
     auto* channel_test = new ChannelData();
     channel = static_cast<ChannelData*>(region.get_address());
+#ifdef _WINDOWS
+    channel->owner_pid = GetCurrentProcessId();
+#else
+    channel->owner_pid = getpid();
+#endif
     channel->is_full = false;
+    
     return true;
 }
 
@@ -101,8 +134,6 @@ void IpcShmChannel::SetRecvCallback(std::function<void(const char *, size_t)> cb
 
 void IpcShmChannel::recv_loop()
 {
-    //std::this_thread::sleep_for(std::chrono::seconds(10));
-
     open_shared_memory(read_shm_name, recv_shm, recv_region, recv_channel);
 
     while (running)
