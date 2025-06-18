@@ -13,20 +13,32 @@
 #include <chrono>
 #include <stdexcept>
 
-#define DEFULT_BUFFER_CAP 1024
-
-enum class Role {
-    CLIENT,
-    SERVER
-};
-
+#define DEFULT_BUFFER_CAP 1024*64
+    
 // 共享内存中的数据结构
-
 class ChannelData;
-
-typedef std::function<void(int sender_pid, const char* data, size_t data_size)> RecvDataCallback;
 class IpcShmChannel {
 public:
+    enum class Role {
+        CLIENT,
+        SERVER
+    };
+
+    enum class EventType
+    {
+        start_listen = 1,
+        stop_listen,
+        client_hello,
+        server_hello,
+        client_byebye,
+        server_byebye,
+        msg_text,
+        msg_json,
+        msg_pb
+    };
+
+    typedef std::function<void(EventType type, int sender_pid, const char* data, size_t data_size)> RecvDataCallback;
+
     // 构造函数，指定角色和共享内存基础名称
     IpcShmChannel(Role role, const std::string& shm_name);
 
@@ -41,8 +53,12 @@ public:
 
     void Stop();
 
-    // 发送数据
-    bool Send(const char* data, size_t size);
+    // 发送消息
+    bool SendTextMsg(const char* data, size_t size);
+
+    bool SendJsonMsg(const char* data, size_t size);
+
+    bool SendPbMsg(const char* data, size_t size);
 
     // 设置接收回调
     void SetRecvCallback(RecvDataCallback cb);
@@ -51,11 +67,15 @@ private:
     // 接收线程循环
     void recv_loop();
 
+    bool send(EventType evt, const char* data, size_t size);
+
     // 创建读写共享内存
     bool create_shared_memory(const std::string& shm_name, boost::interprocess::shared_memory_object& shm, boost::interprocess::mapped_region& region, ChannelData*& channel);
 
     // 打开只读共享内存
     bool open_shared_memory(const std::string& shm_name, boost::interprocess::shared_memory_object& shm, boost::interprocess::mapped_region& region, ChannelData*& channel);
+
+    void notify(EventType evt, int sender_pid, const char* data, size_t size);
 
     Role role_;                       // 角色：Client或Server
     size_t buffer_size_;              // 缓冲区大小
@@ -65,11 +85,11 @@ private:
     
     boost::interprocess::shared_memory_object send_shm_;   // 发送共享内存对象
     boost::interprocess::mapped_region send_region_;       // 发送共享内存映射
-    ChannelData* send_channel_;       // 发送通道数据
+    ChannelData* send_channel_ = nullptr;       // 发送通道数据
 
     boost::interprocess::shared_memory_object recv_shm_;   // 接收共享内存对象
     boost::interprocess::mapped_region recv_region_;       // 接收共享内存映射
-    ChannelData* recv_channel_;       // 接收通道数据
+    ChannelData* recv_channel_ = nullptr;       // 接收通道数据
 
     RecvDataCallback recv_callback_; // 接收回调
     std::thread recv_thread_;         // 接收线程

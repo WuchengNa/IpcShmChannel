@@ -9,9 +9,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/output/win/x64/IpcShmChannel.exe",
-            "args": ["--gtest_filter=api.server"],
+            "args": ["--gtest_filter=api.run_stress_tests"],
             "cwd": "${workspaceRoot}",
-            "externalConsole": false,
+            "externalConsole": true,
             "preLaunchTask": "cmake-build"
         }
     ]
