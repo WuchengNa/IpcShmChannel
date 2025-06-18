@@ -15,27 +15,31 @@ TEST(api,clear)
 TEST(api,server)
 {
         IpcShmChannel server(Role::SERVER, SHM_NAME);
-        server.SetRecvCallback([&](const char* data, size_t size) {
+        server.SetRecvCallback([&](int send_pid, const char* data, size_t size) {
             std::string dataStr(data, size);
             std::cout <<"Server Recv:" << dataStr << std::endl;
         });
-
+        server.Start();
         // Server 发送消息
         while(getchar() != 'q'){
             server.Send("Hello from Server", 17);
         }    
+        server.Send("ByeBye from Server", 18);
+        server.Stop();
 }
 
 TEST(api,client)
 {
         IpcShmChannel client(Role::CLIENT, SHM_NAME);
-        client.SetRecvCallback([&](const char* data, size_t size) {
+        client.SetRecvCallback([&](int send_pid, const char* data, size_t size) {
             std::string dataStr(data, size);
             std::cout <<"Client Recv:" << dataStr << std::endl;
         });
-
-        // Server 发送消息
+        client.Start();
+        // Client 发送消息
         while(getchar() != 'q'){
             client.Send("Hello from Client", 17);
         }  
+        client.Send("ByeBye from Client", 18);
+        client.Stop();
 }
