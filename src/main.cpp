@@ -17,8 +17,6 @@ int main(int argc, char* argv[])
     if(argc == 2)
     {
         testing::GTEST_FLAG(filter) = argv[1];
-    }else{
-        testing::GTEST_FLAG(filter) = "*";
     }
 
 

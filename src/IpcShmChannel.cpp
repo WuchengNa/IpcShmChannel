@@ -6,6 +6,8 @@
     #include <unistd.h>
 #endif
 
+#include <iostream>
+
 using namespace boost::interprocess;
 
 class ChannelData {
@@ -62,7 +64,6 @@ bool IpcShmChannel::create_shared_memory(const std::string& shm_name, shared_mem
 #else
     channel->owner_pid = getpid();
 #endif
-    send(role_ == Role::CLIENT ? EventType::client_hello:EventType::server_hello, 0, 0);
     return true;
 }
 
@@ -143,6 +144,8 @@ void IpcShmChannel::Stop()
 {
     if(running_)
     {
+        send(role_ == Role::CLIENT ? EventType::client_byebye : EventType::server_byebye, 0, 0);
+
         running_ = false;
 
         if(send_channel_ != nullptr){        
@@ -211,34 +214,44 @@ bool IpcShmChannel::SendPbMsg(const char* data, size_t size)
 
 void IpcShmChannel::recv_loop()
 {
+    notify(EventType::start_listen, 0, read_shm_name_.data(), read_shm_name_.size());
     if (!open_shared_memory(read_shm_name_, recv_shm_, recv_region_, recv_channel_)) {
         return;
     }
 
-    notify(EventType::start_listen, 0, 0, 0);
-    
+    bool needSayHello = !send(role_ == Role::CLIENT ? EventType::client_hello : EventType::server_hello, 0, 0);
+
     char data_tmp[DEFULT_BUFFER_CAP];
-    size_t data_size= 0;
+    size_t data_size = 0;
     int sender_pid = 0;
     EventType type = EventType::start_listen;
+
     while (running_)
     {
-        scoped_lock<interprocess_mutex> lock(recv_channel_->mutex);  
-        recv_channel_->cond.wait(lock, [this]() { return !recv_channel_->sender_working || recv_channel_->new_msg || !running_; });
+        {
+            scoped_lock<interprocess_mutex> lock(recv_channel_->mutex);
+            recv_channel_->cond.wait(lock, [this]() { return !recv_channel_->sender_working || recv_channel_->new_msg || !running_; });
 
-        if (!running_ || !recv_channel_->sender_working) {
-            lock.unlock();
+            if (!running_ || !recv_channel_->sender_working) {
+                lock.unlock();
+                recv_channel_->cond.notify_one();
+                break;
+            }
+            sender_pid = recv_channel_->owner_pid;
+            data_size = recv_channel_->size;
+            type = (EventType)recv_channel_->ev_type;
+            memcpy(data_tmp, recv_channel_->buffer, data_size);
+            recv_channel_->new_msg = false;
+            lock.unlock(); // 解锁互斥锁，允许其他线程发送数据
             recv_channel_->cond.notify_one();
-            break;
-        } 
-        sender_pid = recv_channel_->owner_pid;
-        data_size = recv_channel_->size;
-        type = (EventType)recv_channel_->ev_type;
-        memcpy(data_tmp, recv_channel_->buffer, data_size);
-        recv_channel_->new_msg = false;
-
-        lock.unlock(); // 解锁互斥锁，允许其他线程发送数据
-        recv_channel_->cond.notify_one();
+        }
         notify(type, sender_pid, data_tmp, data_size);
+
+        if (needSayHello && (type == EventType::client_hello || type == EventType::server_hello))
+        {
+            needSayHello = false;
+            send(role_ == Role::CLIENT ? EventType::client_hello : EventType::server_hello, 0, 0);
+        }
     }
+    notify(EventType::stop_listen, 0, read_shm_name_.data(), read_shm_name_.size());
 }
