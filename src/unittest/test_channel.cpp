@@ -57,6 +57,9 @@ TEST(api, stress_test) {
     while (!saidHello)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
+    if (getchar() == 'q')
+        channel.Stop();
+
     auto start_time = std::chrono::steady_clock::now();
     auto end_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -81,22 +84,4 @@ TEST(api, stress_test) {
     std::cout << "Messages received: " << recv_count << std::endl;
     std::cout << "Time: " << duration.count() << "ms" << std::endl;
     std::cout << "Messages per milli second: " << (duration.count() > 0 ? static_cast<double>(MSG_COUNT) / duration.count() : 0) << std::endl;
-}
-
-TEST(api, clear)
-{
-    std::string up = std::string(SHM_NAME) + "_up";
-    std::string down = std::string(SHM_NAME) + "_down";
-    boost::interprocess::shared_memory_object::remove(up.c_str());
-    boost::interprocess::shared_memory_object::remove(down.c_str());
-}
-
-TEST(api, run_stress_tests) {
-    auto proName = GetCurrentProcessNameMy();
-    auto clientProName = proName + " --gtest_filter=api.stress_test_client";
-    std::system(clientProName.c_str());
-
-    auto serverProName = proName + " --gtest_filter=api.stress_test_server";
-    std::system(serverProName.c_str());
-
 }

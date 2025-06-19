@@ -1,3 +1,12 @@
+/****************************************
+ * IpcShmChannel.h
+ * IPC shared memory channel based on Boost.Interprocess
+ * Supports text, JSON, and protobuf message transmission
+ * @Author: wucheng
+ * @Date: 2025-06-19
+ * @Version: 1.0.0
+ ***************************************/
+
 #ifndef IPC_SHM_CHANNEL_H
 #define IPC_SHM_CHANNEL_H
 
