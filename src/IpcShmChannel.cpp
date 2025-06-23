@@ -10,6 +10,49 @@
 
 using namespace boost::interprocess;
 
+// 定义DataPacket的前缀
+// |type(1 byte)|data total length(3 byte)|chunk seq (2 byte)|chunk total count(2 byte)|data chunk(Max(DEFULT_BUFFER_CAP))|
+
+struct DataPacketHeader
+{
+    short type;         // 实际只用1字节
+    size_t totalLen;       // 实际只用3字节
+    short chunkSeq;     // 2字节
+    short chunkTotalCount; // 2字节
+
+    // 将头部信息写入buffer
+    void SetHeader(char* buffer) const {
+        buffer[0] = static_cast<char>(type & 0xFF);
+        // totalLen 占3字节（大端序）
+        buffer[1] = static_cast<char>((totalLen >> 16) & 0xFF);
+        buffer[2] = static_cast<char>((totalLen >> 8) & 0xFF);
+        buffer[3] = static_cast<char>(totalLen & 0xFF);
+        // chunkSeq 占2字节（大端序）
+        buffer[4] = static_cast<char>((chunkSeq >> 8) & 0xFF);
+        buffer[5] = static_cast<char>(chunkSeq & 0xFF);
+        // chunkTotalCount 占2字节（大端序）
+        buffer[6] = static_cast<char>((chunkTotalCount >> 8) & 0xFF);
+        buffer[7] = static_cast<char>(chunkTotalCount & 0xFF);
+    }
+
+    // 从buffer解析出头部信息
+    void GetHeader(char* buffer) {
+        type = static_cast<unsigned char>(buffer[0]);
+        // totalLen 占3字节（大端序）
+        totalLen = (static_cast<unsigned char>(buffer[1]) << 16) |
+                   (static_cast<unsigned char>(buffer[2]) << 8) |
+                   (static_cast<unsigned char>(buffer[3]));
+        // chunkSeq 占2字节（大端序）
+        chunkSeq = (static_cast<unsigned char>(buffer[4]) << 8) |
+                   (static_cast<unsigned char>(buffer[5]));
+        // chunkTotalCount 占2字节（大端序）
+        chunkTotalCount = (static_cast<unsigned char>(buffer[6]) << 8) |
+                          (static_cast<unsigned char>(buffer[7]));
+    }
+};
+
+
+#define DataPacketPrefixSize 8 // 前缀大小：1 + 3 + 2 + 2 = 8 bytes
 class ChannelData
 {
 public:
@@ -33,7 +76,7 @@ public:
     int owner_pid;
     short ev_type;
     size_t size;                    // 数据大小
-    char buffer[DEFULT_BUFFER_CAP]; // 数据缓冲区
+    char buffer[DataPacketPrefixSize+DEFULT_BUFFER_CAP]; // 数据缓冲区
 };
 
 bool IpcShmChannel::create_shared_memory(const std::string &shm_name, shared_memory_object &shm, mapped_region &region, ChannelData *&channel)
@@ -188,9 +231,35 @@ void IpcShmChannel::SetRecvCallback(RecvDataCallback cb)
     recv_callback_ = cb;
 }
 
+
 bool IpcShmChannel::send(EventType evt, const char *data, size_t size)
 {
-    if (size > DEFULT_BUFFER_CAP || send_channel_ == nullptr)
+    // 若size超过单个包的最大容量，则拆分成若干个不大于DEFULT_BUFFER_CAP的包发送
+    DataPacketHeader header{(short)evt,size,0,1};
+    if (evt == EventType::msg_data && size > DEFULT_BUFFER_CAP)
+    {
+        header.chunkTotalCount = (size + DEFULT_BUFFER_CAP - 1) / DEFULT_BUFFER_CAP; // 向上取整
+
+        for (size_t i = 0; i < header.chunkTotalCount; ++i)
+        {
+            size_t leftSize = size - i * DEFULT_BUFFER_CAP;
+            header.chunkSeq = i;
+            size_t chunk_size = DEFULT_BUFFER_CAP < leftSize ?  DEFULT_BUFFER_CAP : leftSize ;
+            if (!sendPacket(evt,&header, data + i * DEFULT_BUFFER_CAP, chunk_size))
+            {
+                return false; // 发送失败，后续补充flush消息，避免接收端持续等待
+            }
+        }
+        return true;
+    }else{
+        //直接发送单个包
+        return sendPacket(evt, &header, data, size);
+    }
+}
+
+bool IpcShmChannel::sendPacket(EventType evt,const DataPacketHeader* header, const char *data, size_t data_size)
+{
+    if (data_size > DEFULT_BUFFER_CAP || send_channel_ == nullptr)
     {
         return false; // 数据大小超
     }
@@ -204,8 +273,9 @@ bool IpcShmChannel::send(EventType evt, const char *data, size_t size)
         return false;
     }
     // memset(send_channel_->buffer, 0, DEFULT_BUFFER_CAP);
-    memcpy(send_channel_->buffer, data, size);
-    send_channel_->size = size;
+    header->SetHeader(send_channel_->buffer);
+    memcpy(send_channel_->buffer + DataPacketPrefixSize, data, data_size);
+    send_channel_->size = data_size + DataPacketPrefixSize;
     send_channel_->new_msg = true;
     send_channel_->ev_type = (short)evt;
     if (evt == EventType::client_byebye || evt == EventType::server_byebye)
@@ -215,19 +285,9 @@ bool IpcShmChannel::send(EventType evt, const char *data, size_t size)
     return true;
 }
 
-bool IpcShmChannel::SendTextMsg(const char *data, size_t size)
+bool IpcShmChannel::SendMsg(const char *data, size_t size)
 {
-    return send(EventType::msg_text, data, size);
-}
-
-bool IpcShmChannel::SendJsonMsg(const char *data, size_t size)
-{
-    return send(EventType::msg_json, data, size);
-}
-
-bool IpcShmChannel::SendPbMsg(const char *data, size_t size)
-{
-    return send(EventType::msg_pb, data, size);
+    return send(EventType::msg_data, data, size);
 }
 
 void IpcShmChannel::recv_loop()
@@ -243,8 +303,10 @@ void IpcShmChannel::recv_loop()
         sender_working = recv_channel_->sender_working;
         bool needSayHello = !send(role_ == Role::CLIENT ? EventType::client_hello : EventType::server_hello, 0, 0);
 
-        char data_tmp[DEFULT_BUFFER_CAP];
+        char *data_tmp = nullptr;
         size_t data_size = 0;
+        size_t recv_msg_len = 0;
+        size_t msg_len = 0;
         int sender_pid = 0;
         EventType type = EventType::start_listen;
 
@@ -265,12 +327,39 @@ void IpcShmChannel::recv_loop()
                 sender_pid = recv_channel_->owner_pid;
                 data_size = recv_channel_->size;
                 type = (EventType)recv_channel_->ev_type;
-                memcpy(data_tmp, recv_channel_->buffer, data_size);
+                DataPacketHeader header;
+                header.GetHeader(recv_channel_->buffer);
+                if (header.chunkSeq == 0 && header.totalLen != 0) {
+                    //first packet
+                    msg_len = header.totalLen;
+                    data_tmp = new char[msg_len];
+                }
+                if(data_tmp != nullptr)
+                    memcpy(data_tmp + header.chunkSeq*DEFULT_BUFFER_CAP, recv_channel_->buffer + DataPacketPrefixSize, data_size - DataPacketPrefixSize);
                 recv_channel_->new_msg = false;
                 lock.unlock(); // 解锁互斥锁，允许其他线程发送数据
                 recv_channel_->cond.notify_one();
+
+                recv_msg_len += (data_size - DataPacketPrefixSize);
+
+                if (header.chunkSeq + 1 < header.chunkTotalCount) {
+                    continue;
+                }
+                else if(recv_msg_len != msg_len && data_tmp != nullptr){
+                    delete[] data_tmp;
+                    data_tmp = nullptr;
+                    msg_len = 0;
+                    recv_msg_len = 0;
+                    continue;
+                }
             }
-            notify(type, sender_pid, data_tmp, data_size);
+            notify(type, sender_pid, data_tmp, msg_len);
+            if (data_tmp != nullptr) {
+                delete[] data_tmp;
+                data_tmp = nullptr;
+                msg_len = 0;
+                recv_msg_len = 0;
+            }
 
             if (needSayHello && (type == EventType::client_hello || type == EventType::server_hello))
             {
@@ -281,3 +370,4 @@ void IpcShmChannel::recv_loop()
     }
     notify(EventType::stop_listen, 0, read_shm_name_.data(), read_shm_name_.size());
 }
+

@@ -22,9 +22,10 @@
 #include <chrono>
 #include <stdexcept>
 
-#define DEFULT_BUFFER_CAP 1024*64
+const int DEFULT_BUFFER_CAP = 1024 * 32;
     
 // 共享内存中的数据结构
+struct DataPacketHeader;
 class ChannelData;
 class IpcShmChannel {
 public:
@@ -41,9 +42,7 @@ public:
         server_hello,
         client_byebye,
         server_byebye,
-        msg_text,
-        msg_json,
-        msg_pb
+        msg_data,
     };
 
     typedef std::function<void(EventType type, int sender_pid, const char* data, size_t data_size)> RecvDataCallback;
@@ -63,11 +62,7 @@ public:
     void Stop();
 
     // 发送消息
-    bool SendTextMsg(const char* data, size_t size);
-
-    bool SendJsonMsg(const char* data, size_t size);
-
-    bool SendPbMsg(const char* data, size_t size);
+    bool SendMsg(const char* data, size_t size);
 
     // 设置接收回调
     void SetRecvCallback(RecvDataCallback cb);
@@ -77,6 +72,8 @@ private:
     void recv_loop();
 
     bool send(EventType evt, const char* data, size_t size);
+
+    bool sendPacket(EventType evt, const DataPacketHeader* header, const char* data, size_t data_size);
 
     // 创建读写共享内存
     bool create_shared_memory(const std::string& shm_name, boost::interprocess::shared_memory_object& shm, boost::interprocess::mapped_region& region, ChannelData*& channel);

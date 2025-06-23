@@ -44,7 +44,7 @@ TEST(api, stress_test) {
             return;
         }
         else {
-            std::string dataStr(data, size);
+            std::string dataStr(data, 50);
             std::cout << (is_server ? "[Server] " : "[Client] ") << "Received message, type:" << (short)evt << " from pid " << send_pid << ": " << dataStr << std::endl;
             recv_count++;
         }
@@ -53,6 +53,12 @@ TEST(api, stress_test) {
     std::cout << (is_server ? "[Server] " : "[Client] ") << "Starting..." << std::endl;
     channel.Start();
     auto con = fu_connect.get();
+
+    std::string longStr;
+    //造一个longstr,长度超过1MB
+    longStr = "####header####" + std::string(1024*1024+512, 'A');
+    longStr +="####end####";
+
 
     while (!saidHello)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -67,8 +73,9 @@ TEST(api, stress_test) {
     std::thread send_thread([&]() {
         start_time = std::chrono::steady_clock::now();
         for (int i = 0; i < MSG_COUNT; i++) {
-            std::string msg = std::string(is_server ? "Server" : "Client") + " Message #" + std::to_string(i);
-            channel.SendTextMsg(msg.c_str(), msg.length());
+            std::string msg = std::string(is_server ? "Server" : "Client") + " Message #" + std::to_string(i) + longStr;
+            bool ret = channel.SendMsg(msg.c_str(), msg.length());
+            std::cout << "Send Msg result :" << (ret ? "Success" : "Failed") << std::endl;
         }
         end_time = std::chrono::steady_clock::now();
         channel.Stop();
