@@ -21,11 +21,17 @@
 #include <string>
 #include <chrono>
 #include <stdexcept>
+#include <memory>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <map>
 
 const int DEFULT_BUFFER_CAP = 1024 * 32;
     
 // 共享内存中的数据结构
 struct DataPacketHeader;
+struct DataPacket;
 class ChannelData;
 class IpcShmChannel {
 public:
@@ -42,6 +48,8 @@ public:
         server_hello,
         client_byebye,
         server_byebye,
+        ping,
+        pong,
         msg_data,
     };
 
@@ -61,8 +69,8 @@ public:
 
     void Stop();
 
-    // 发送消息
-    bool SendMsg(const char* data, size_t size);
+    // 发送消息,非阻塞
+    bool PostMsg(const char* data, size_t size);
 
     // 设置接收回调
     void SetRecvCallback(RecvDataCallback cb);
@@ -71,17 +79,43 @@ private:
     // 接收线程循环
     void recv_loop();
 
+    bool recv(EventType& type, bool& get_completed_msg);
+
+    void send_loop();
+
     bool send(EventType evt, const char* data, size_t size);
 
-    bool sendPacket(EventType evt, const DataPacketHeader* header, const char* data, size_t data_size);
+    void heart_beat_loop();
 
-    // 创建读写共享内存
+    bool post(EventType evt, const char* data, size_t size);
+    
+    typedef std::shared_ptr<DataPacket> DataPacketPtr;
+    bool push_packet(DataPacketPtr packet);
+    DataPacketPtr pop_packet();
+
+    bool push_packet(EventType evt, const DataPacketHeader* header, const char* data, size_t data_size);
+    
+    bool send_packet(EventType evt, const DataPacketHeader* header, const char* data, size_t data_size);
+
+    void clear_send_queue();
+    
+    void reset_send_channel();
+
+    // 创建共享内存
     bool create_shared_memory(const std::string& shm_name, boost::interprocess::shared_memory_object& shm, boost::interprocess::mapped_region& region, ChannelData*& channel);
 
-    // 打开只读共享内存
+    // 打开共享内存
     bool open_shared_memory(const std::string& shm_name, boost::interprocess::shared_memory_object& shm, boost::interprocess::mapped_region& region, ChannelData*& channel);
 
     void notify(EventType evt, int sender_pid, const char* data, size_t size);
+
+    void set_send_channel_status(bool connected);
+    void set_recv_channel_status(bool connected);
+
+    bool hello();
+    bool bye();
+    bool ping();
+    bool pong();
 
     Role role_;                       // 角色：Client或Server
     size_t buffer_size_;              // 缓冲区大小
@@ -92,14 +126,27 @@ private:
     boost::interprocess::shared_memory_object send_shm_;   // 发送共享内存对象
     boost::interprocess::mapped_region send_region_;       // 发送共享内存映射
     ChannelData* send_channel_ = nullptr;       // 发送通道数据
+    std::atomic<bool>   send_channel_connected_;
 
     boost::interprocess::shared_memory_object recv_shm_;   // 接收共享内存对象
     boost::interprocess::mapped_region recv_region_;       // 接收共享内存映射
     ChannelData* recv_channel_ = nullptr;       // 接收通道数据
+    std::atomic<bool>   recv_channel_connected_;
 
     RecvDataCallback recv_callback_; // 接收回调
     std::thread recv_thread_;         // 接收线程
     std::atomic<bool> running_;       // 运行标志
+
+    std::thread heart_beat_thread_; // 定时器线程
+    std::atomic<size_t> pend_pong_count_; // ping待答复计数，>3则认为对方已断开连接
+
+    std::thread send_thread_;
+    std::mutex  pkt_que_mtx_;
+    std::condition_variable pkt_que_cv_;
+    std::queue<DataPacketPtr> packet_que_;
+
+    std::atomic<long> msg_seq_picker_;
+    std::map<long, std::pair<char*, size_t>> recv_msg_map_;
 };
 
 #endif // IPC_SHM_CHANNEL_H

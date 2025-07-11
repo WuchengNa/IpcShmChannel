@@ -24,13 +24,11 @@ TEST(api, stress_test) {
     IpcShmChannel channel(is_server ? IpcShmChannel::Role::SERVER : IpcShmChannel::Role::CLIENT, SHM_NAME);
     const int MSG_COUNT = 10000;
     std::atomic<int> recv_count{0};
-    static std::promise<bool> connect;
-    auto fu_connect = connect.get_future();
+
     bool saidHello = false;
 
     channel.SetRecvCallback([&](IpcShmChannel::EventType evt, int send_pid, const char* data, size_t size) {
         if (evt == IpcShmChannel::EventType::start_listen) {
-            connect.set_value(true);
             std::cout << (is_server ? "[Server] " : "[Client] ") << "start_listen " << data << std::endl;
             return;
         }
@@ -42,9 +40,15 @@ TEST(api, stress_test) {
         else if (evt == IpcShmChannel::EventType::client_byebye || evt == IpcShmChannel::EventType::server_byebye) {
             std::cout << (is_server ? "[Server] " : "[Client] ") << "recv byebye!" << std::endl;
             return;
-        }
+        }else if(evt == IpcShmChannel::EventType::ping) {
+            std::cout << (is_server ? "[Server] " : "[Client] ") << "Received ping from pid " << send_pid << std::endl;
+            return;
+        }else if (evt == IpcShmChannel::EventType::pong){
+            std::cout << (is_server ? "[Server] " : "[Client] ") << "Received pong from pid " << send_pid << std::endl;
+            return;
+        } 
         else {
-            std::string dataStr(data, 50);
+            std::string dataStr(data == nullptr ? "": data);
             std::cout << (is_server ? "[Server] " : "[Client] ") << "Received message, type:" << (short)evt << " from pid " << send_pid << ": " << dataStr << std::endl;
             recv_count++;
         }
@@ -52,7 +56,6 @@ TEST(api, stress_test) {
 
     std::cout << (is_server ? "[Server] " : "[Client] ") << "Starting..." << std::endl;
     channel.Start();
-    auto con = fu_connect.get();
 
     std::string longStr;
     //造一个longstr,长度超过1MB
@@ -74,7 +77,7 @@ TEST(api, stress_test) {
         start_time = std::chrono::steady_clock::now();
         for (int i = 0; i < MSG_COUNT; i++) {
             std::string msg = std::string(is_server ? "Server" : "Client") + " Message #" + std::to_string(i) + longStr;
-            bool ret = channel.SendMsg(msg.c_str(), msg.length());
+            bool ret = channel.PostMsg(msg.c_str(), msg.length());
             std::cout << "Send Msg result :" << (ret ? "Success" : "Failed") << std::endl;
         }
         end_time = std::chrono::steady_clock::now();

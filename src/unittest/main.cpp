@@ -14,7 +14,7 @@ std::string GetCurrentProcessNameMy()
 
 int main(int argc, char* argv[])
 {
-    if(argc == 2)
+    if(argc >= 2)
     {
         testing::GTEST_FLAG(filter) = argv[1];
     }

@@ -85,6 +85,7 @@
         "source_location": "cpp",
         "valarray": "cpp",
         "queue": "cpp",
-        "xstddef": "cpp"
+        "xstddef": "cpp",
+        "future": "cpp"
     }
 }

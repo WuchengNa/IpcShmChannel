@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/output/win/x64/IpcShmChannel.exe",
-            "args": ["--gtest_filter=api.run_stress_tests"],
+            "args": ["--gtest_filter=api.api.stress_test client"],
             "cwd": "${workspaceRoot}",
             "externalConsole": true,
             "preLaunchTask": "cmake-build"
